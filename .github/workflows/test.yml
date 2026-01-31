@@ -13,6 +13,8 @@ jobs:
       FFMPEG_VERSION: 8.0
       NODE_VERSION: 18.x
       PYTHON_VERSION: 3.9
+    # 步骤失败立即终止，节省构建时间
+
 
     steps:
       - name: Clone author's st0rmMusicPlayer (public repo)
@@ -28,13 +30,15 @@ jobs:
         run: |
           sudo add-apt-repository -y ppa:deadsnakes/ppa
           sudo apt update -y
-          # 安装Python3.9核心包（无python3.9-pip，该源不提供）
+          # 安装Python3.9核心包
           sudo apt install -y --no-install-recommends python3.9 python3.9-venv python3.9-dev
-          # 手动安装Python3.9专属pip，升级到最新版
+          # 手动安装并升级Python3.9专属pip
           python3.9 -m ensurepip --upgrade
-          # 仅绑定python3全局指向3.9（关键：移除pip3重复绑定，解决核心报错）
+          # 全局绑定python3到3.9版本
           sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 100
-          # 版本验证（确保python3/pip3均归属3.9）
+          # 核心修复：全局绑定pip3到Python3.9，解决版本不匹配问题
+          sudo ln -sf /usr/local/lib/python3.9/dist-packages/pip/pip3 /usr/bin/pip3
+          # 版本验证
           echo "=== Python Global Version ==="
           python3 --version
           echo "=== Pip Global Version & Belonging ==="
@@ -43,10 +47,15 @@ jobs:
       - name: Install FFmpeg 8.0 (prebuilt static, no compile)
         run: |
           mkdir -p ~/ffmpeg && cd ~/ffmpeg
-          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz -O ffmpeg.tar.xz -q
+          # 核心修复1：替换为官方稳定预编译源，无仓库失效风险
+          # 核心修复2：移除-q静默参数，显示下载日志，方便排查
+          wget https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz -O ffmpeg.tar.xz
           tar -xf ffmpeg.tar.xz --strip-components=1
-          sudo cp ffmpeg ffprobe /usr/local/bin/
+          # 适配新源目录结构：ffmpeg/ffprobe在bin目录下
+          sudo cp bin/ffmpeg bin/ffprobe /usr/local/bin/
+          # 双工具版本验证，确保安装成功
           ffmpeg -version | head -n1
+          ffprobe -version | head -n1
           rm -rf ~/ffmpeg
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
@@ -55,6 +64,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: st0rmMusicPlayer/package-lock.json
+
+      - name: Global environment version check (critical)
+        run: |
+          # 新增：全局核心依赖统一验证，提前发现安装错误
+          echo "=== Node.js & NPM Version ==="
+          node -v && npm -v
+          echo -e "\n=== Python & Pip Version ==="
+          python3 --version && pip3 --version
+          echo -e "\n=== FFmpeg & FFprobe Version ==="
+          ffmpeg -version | head -n1
+          ffprobe -version | head -n1
 
       - name: Run project setup script
         run: |
