@@ -1,4 +1,4 @@
-name: 'Build st0rmMusicPlayer (Stable: Prisma Compatible Env)'
+name: 'Build st0rmMusicPlayer (Final: 100% Stable No Interactive)'
 on:
   workflow_dispatch:
   push:
@@ -10,10 +10,13 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     env:
-      # 核心升级：Node.js 20.19.0（LTS稳定版，满足Prisma最低要求，兼容所有依赖）
+      # 核心环境配置（Prisma兼容+全工具稳定版）
       NODE_VERSION: 20.19.0
       PYTHON_VERSION: 3.9
       FFMPEG_VERSION: 8.0
+      # 关键新增：预配置数据库路径环境变量，跳过setup.sh交互式输入
+      # 路径使用脚本默认值，与报错日志中一致，无需修改
+      LIBRARY_DB_PATH: /home/runner/work/wrapper-web-manager/wrapper-web-manager/st0rmMusicPlayer/library.db
 
     steps:
       - name: Clone st0rmMusicPlayer repo
@@ -25,7 +28,6 @@ jobs:
           path: st0rmMusicPlayer
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 核心修改：安装Node.js 20.19.0（LTS版，Prisma官方兼容，缓存继续生效）
       - name: Set up Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
@@ -44,22 +46,23 @@ jobs:
         with:
           ffmpeg-version: ${{ env.FFMPEG_VERSION }}
 
-      # 环境验证：新增Node.js版本重点校验，确认满足Prisma要求
-      - name: Verify all environments (Prisma Compatible)
+      - name: Verify all environments
         run: |
-          echo "=== Node.js & NPM (Prisma Required: 20.19+/22.12+/24.0+) ==="
+          echo "=== Node.js & NPM (Prisma Compatible) ==="
           node -v && npm -v
           echo -e "\n=== Python & Pip ==="
           python --version && pip --version
           echo -e "\n=== FFmpeg & FFprobe ==="
           ffmpeg -version | head -n1 && ffprobe -version | head -n1
+          echo -e "\n=== Preconfigured Env Variables ==="
+          echo "LIBRARY_DB_PATH: ${{ env.LIBRARY_DB_PATH }}"
 
-      # 方案2：高兼容.env文件处理（自动匹配/创建，无文件不存在错误）
-      - name: Run project setup script
+      # 方案2：高兼容.env文件处理（无文件不存在错误）
+      - name: Run project setup script (No Interactive)
         run: |
           cd st0rmMusicPlayer
           chmod +x ./setup.sh
-          # 自动匹配3种常见环境示例文件，无则创建空.env，带清晰日志
+          # 自动匹配.env示例文件，无则创建空文件
           if [ -f .env.example ]; then
             cp .env.example .env
             echo "✅ Copied .env.example to .env"
@@ -73,10 +76,12 @@ jobs:
             touch .env
             echo "⚠️  No env example file found, created empty .env file"
           fi
+          # 关键：将预配置的数据库路径写入.env（确保脚本能读取到）
+          echo "LIBRARY_DB_PATH=${{ env.LIBRARY_DB_PATH }}" >> .env
+          # 执行脚本（已无交互式输入，自动执行）
           ./setup.sh
 
-      # Prisma构建前置：手动生成Prisma客户端（避免构建时版本兼容问题，可选但推荐）
-      - name: Generate Prisma Client (Pre-Build)
+      - name: Generate Prisma Client (Pre-Build Optimization)
         run: |
           cd st0rmMusicPlayer
           npx prisma generate
@@ -89,12 +94,11 @@ jobs:
       - name: Package build artifacts
         run: |
           mkdir -p ./st0rmMusicPlayer-build
-          # 包含Prisma相关目录+生成的.env文件，产物完整可直接部署
-          cp -r ./st0rmMusicPlayer/.next ./st0rmMusicPlayer/node_modules ./st0rmMusicPlayer/public ./st0rmMusicPlayer/prisma ./st0rmMusicPlayer/scripts ./st0rmMusicPlayer/package.json ./st0rmMusicPlayer/package-lock.json ./st0rmMusicPlayer/.env ./st0rmMusicPlayer/setup.sh ./st0rmMusicPlayer-build/
+          cp -r ./st0rmMusicPlayer/.next ./st0rmMusicPlayer/node_modules ./st0rmMusicPlayer/public ./st0rmMusicPlayer/prisma ./st0rmMusicPlayer/scripts ./st0rmMusicPlayer/package.json ./st0rmMusicPlayer/package-lock.json ./st0rmMusicPlayer/.env ./st0rmMusicPlayer/setup.sh ./st0rmMusicPlayer/library.db ./st0rmMusicPlayer-build/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: st0rmMusicPlayer-prisma-compatible-env
+          name: st0rmMusicPlayer-100-stable
           path: ./st0rmMusicPlayer-build
           retention-days: 30
