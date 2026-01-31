@@ -1,6 +1,4 @@
-name: Build st0rmMusicPlayer and Upload Artifacts
-
-# 触发条件：可按需修改（如 push 到 main 分支、手动触发）
+name: Build st0rmMusicPlayer (Author Repo + FFmpeg 8.0)
 on:
   push:
     branches: [ main ]
@@ -8,74 +6,111 @@ on:
     branches: [ main ]
   workflow_dispatch: # 手动触发
 
-# 运行环境
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      # 定义版本常量（方便统一维护）
+      FFMPEG_VERSION: 8.0
+      NODE_VERSION: 18.x
+      PYTHON_VERSION: 3.9 # 严格按项目要求指定3.9
+
     steps:
-      # 步骤1：设置运行环境（Node.js + Python + 系统依赖）
-      - name: Set up system dependencies
-        run: |
-          # 更新系统并安装基础依赖（FFmpeg、Python venv、git 等）
-          sudo apt update && sudo apt upgrade -y
-          sudo apt install -y --no-install-recommends \
-            ffmpeg \
-            python3.9 python3.9-venv python3.9-pip \
-            git build-essential libssl-dev curl wget
-
-      # 步骤2：设置 Node.js 环境（匹配项目要求的 18.x 版本）
-      - name: Set up Node.js 18.x
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18.x'
-          cache: 'npm' # 缓存 npm 依赖，加速构建
-
-      # 步骤3：克隆代码（含子模块）
-      - name: Clone repository with submodules
+      # ===================== 步骤1：拉取作者公共仓库源码（含子模块） =====================
+      - name: Clone author's st0rmMusicPlayer (public repo)
         uses: actions/checkout@v4
         with:
-          submodules: recursive # 递归拉取所有子模块
-          fetch-depth: 0 # 拉取完整提交历史（可选，按需）
+          repository: sn0wst0rm/st0rmMusicPlayer # 替换为作者实际仓库名（用户名/仓库名）
+          ref: main # 作者仓库默认分支，需确认
+          submodules: recursive # 递归拉取子模块（严格按项目要求）
+          path: st0rmMusicPlayer # 拉取到指定目录
+          token: ${{ secrets.GITHUB_TOKEN }} # 公共仓库无需自定义PAT，用内置token即可
 
-      # 步骤4：执行 setup.sh 初始化项目（核心：安装依赖、初始化数据库等）
-      - name: Run setup script
+      # ===================== 步骤2：安装Python 3.9（严格版本，Ubuntu 24.04适配） =====================
+      - name: Install Python 3.9 (strict version)
         run: |
-          # 赋予脚本执行权限
+          # 添加deadsnakes源（Ubuntu 24.04官方源无3.9，该源是官方维护的）
+          sudo add-apt-repository -y ppa:deadsnakes/ppa
+          sudo apt update
+          # 严格安装Python 3.9全套依赖（按项目要求）
+          sudo apt install -y --no-install-recommends \
+            python3.9 \
+            python3.9-venv \
+            python3.9-pip \
+            python3.9-dev
+          # 验证版本（确保是3.9）
+          python3.9 --version
+          # 设置python3默认指向3.9（避免脚本调用python3时版本不符）
+          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 100
+          python3 --version
+
+      # ===================== 步骤3：安装FFmpeg 8.0（预编译版，不编译） =====================
+      - name: Install FFmpeg 8.0 (prebuilt, no compile)
+        run: |
+          # 创建临时目录存放FFmpeg
+          mkdir -p ~/ffmpeg && cd ~/ffmpeg
+          # 下载FFmpeg 8.0 Linux x64预编译包（官方静态编译版）
+          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz -O ffmpeg-${FFMPEG_VERSION}.tar.xz
+          # 解压
+          tar -xf ffmpeg-${FFMPEG_VERSION}.tar.xz --strip-components=1
+          # 将ffmpeg/ffprobe移到系统PATH目录（全局可用）
+          sudo cp ffmpeg ffprobe /usr/local/bin/
+          # 验证版本（确保是8.0）
+          ffmpeg -version
+          ffprobe -version
+          # 清理临时文件
+          rm -rf ~/ffmpeg
+
+      # ===================== 步骤4：安装Node.js 18.x（严格版本） =====================
+      - name: Set up Node.js ${{ env.NODE_VERSION }} (strict version)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }} # 严格指定18.x
+          cache: 'npm'
+          cache-dependency-path: st0rmMusicPlayer/package-lock.json # 精准缓存依赖
+
+      # ===================== 步骤5：项目初始化（严格按项目脚本） =====================
+      - name: Project initialization (strict setup)
+        run: |
+          cd st0rmMusicPlayer
+          # 赋予setup.sh执行权限
           chmod +x ./setup.sh
-          # 执行 setup.sh（若脚本有交互，需提前配置 .env）
-          # 注：若 setup.sh 依赖 .env 文件，需先创建（可通过 Secrets 注入）
-          cp .env.example .env # 复制示例环境变量（按需修改）
+          # 复制示例环境变量（项目必需）
+          cp .env.example .env
+          # 执行项目初始化脚本（严格按项目要求）
           ./setup.sh
+          # 验证依赖安装版本
+          npm --version
+          python3 --version
+          ffmpeg -version
 
-      # 步骤5：构建项目（确保生产环境构建完成）
-      - name: Build production bundle
+      # ===================== 步骤6：构建生产包（严格按项目命令） =====================
+      - name: Build production bundle (strict command)
         run: |
-          npm run build # 执行 Next.js 构建（项目核心编译步骤）
+          cd st0rmMusicPlayer
+          npm run build # 严格执行项目自带的build命令
 
-      # 步骤6：打包编译后的产物（梳理需要上传的目录）
+      # ===================== 步骤7：打包并上传产物 =====================
       - name: Package build artifacts
         run: |
-          # 创建产物目录，整理需要保留的文件
-          mkdir -p ./build-artifacts
-          # 复制核心产物（根据项目结构调整，以下是 st0rmMusicPlayer 核心文件）
+          mkdir -p ./st0rmMusicPlayer-build
           cp -r \
-            ./node_modules \
-            ./build \
-            ./public \
-            ./src \
-            ./prisma \
-            ./scripts \
-            ./package.json \
-            ./package-lock.json \
-            ./next.config.js \
-            ./.env \
-            ./setup.sh \
-            ./build-artifacts/
+            ./st0rmMusicPlayer/node_modules \
+            ./st0rmMusicPlayer/build \
+            ./st0rmMusicPlayer/public \
+            ./st0rmMusicPlayer/src \
+            ./st0rmMusicPlayer/prisma \
+            ./st0rmMusicPlayer/scripts \
+            ./st0rmMusicPlayer/package.json \
+            ./st0rmMusicPlayer/package-lock.json \
+            ./st0rmMusicPlayer/next.config.ts \
+            ./st0rmMusicPlayer/.env \
+            ./st0rmMusicPlayer/setup.sh \
+            ./st0rmMusicPlayer-build/
 
-      # 步骤7：上传产物到 GitHub Actions Artifacts
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: st0rmMusicPlayer-build # 产物包名称
-          path: ./build-artifacts # 要上传的产物目录
-          retention-days: 30 # 产物保留天数（可选，默认90天）
+          name: st0rmMusicPlayer-author-build-ffmpeg8.0
+          path: ./st0rmMusicPlayer-build
+          retention-days: 30
