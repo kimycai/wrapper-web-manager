@@ -1,4 +1,4 @@
-name: 'Build st0rmMusicPlayer (Stable: All Env + Env Skip Fix)'
+name: 'Build st0rmMusicPlayer (Stable: All Env + Env File Auto Match)'
 on:
   workflow_dispatch:
   push:
@@ -51,11 +51,25 @@ jobs:
           echo -e "\n=== FFmpeg & FFprobe ==="
           ffmpeg -version | head -n1 && ffprobe -version | head -n1
 
-      # 核心修改（方案3）：跳过.env创建，直接执行setup.sh（脚本自身处理环境配置）
+      # 核心修改（方案2）：自动匹配常见.env示例文件，无则创建空文件，无任何报错
       - name: Run project setup script
         run: |
           cd st0rmMusicPlayer
           chmod +x ./setup.sh
+          # 自动匹配3种常见环境示例文件，按优先级复制，无则创建空.env并提示
+          if [ -f .env.example ]; then
+            cp .env.example .env
+            echo "✅ Copied .env.example to .env"
+          elif [ -f .env.sample ]; then
+            cp .env.sample .env
+            echo "✅ Copied .env.sample to .env"
+          elif [ -f .env.example.dist ]; then
+            cp .env.example.dist .env
+            echo "✅ Copied .env.example.dist to .env"
+          else
+            touch .env
+            echo "⚠️  No env example file found, created empty .env file"
+          fi
           ./setup.sh
 
       - name: Build production bundle (Next.js)
@@ -66,8 +80,8 @@ jobs:
       - name: Package build artifacts
         run: |
           mkdir -p ./st0rmMusicPlayer-build
-          cp -r ./st0rmMusicPlayer/.next ./st0rmMusicPlayer/node_modules ./st0rmMusicPlayer/public ./st0rmMusicPlayer/prisma ./st0rmMusicPlayer/scripts ./st0rmMusicPlayer/package.json ./st0rmMusicPlayer/package-lock.json ./st0rmMusicPlayer/setup.sh ./st0rmMusicPlayer-build/
-          # 注：已移除.env复制（因未手动创建，由setup.sh自行生成/处理）
+          # 包含生成/复制的.env文件，产物完整无遗漏
+          cp -r ./st0rmMusicPlayer/.next ./st0rmMusicPlayer/node_modules ./st0rmMusicPlayer/public ./st0rmMusicPlayer/prisma ./st0rmMusicPlayer/scripts ./st0rmMusicPlayer/package.json ./st0rmMusicPlayer/package-lock.json ./st0rmMusicPlayer/.env ./st0rmMusicPlayer/setup.sh ./st0rmMusicPlayer-build/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
