@@ -45,9 +45,7 @@ jobs:
           cd temp-build
           go mod init wrapper-manager  # 初始化Go模块，模块名固定
           go mod tidy                  # 自动下载WebSocket、PTY及所有关联依赖
-          go build -o wrapper-manager .# 编译生成核心可执行文件
-          ls -lh ./wrapper-manager     # 验证编译产物大小和权限
-          chmod +x ./wrapper-manager   # 赋予可执行权限，确保能直接运行
+          go build -o wrapper-manager .
 
       # 步骤7：免密克隆你的自有仓库 kimycai/wrapper-web-manager（用于推送产物）
       - name: Clone Own Repo - kimycai/wrapper-web-manager
