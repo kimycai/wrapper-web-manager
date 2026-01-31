@@ -1,29 +1,28 @@
 name: Wrapper-Manager Build & Push to kimycai/wrapper-web-manager
-# 仅手动触发，无任何自动执行规则
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 仅手动触发
 
 jobs:
   build-and-push:
     runs-on: ubuntu-24.04
     steps:
-      # 步骤1：配置Git全局身份（推送仓库必备，标识提交者）
+      # 步骤1：配置Git全局身份（推送必备）
       - name: Configure Git Identity
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      # 步骤2：匿名克隆公有仓库 sky8282/wrapper-manager-v1（无需Token）
+      # 步骤2：匿名克隆公有仓库 sky8282/wrapper-manager-v1
       - name: Clone Public Repo - wrapper-manager-v1
         run: |
           git clone --depth 1 https://github.com/sky8282/wrapper-manager-v1.git
 
-      # 步骤3：匿名克隆公有仓库 kimycai/wrapper-push（无需Token）
+      # 步骤3：匿名克隆公有仓库 kimycai/wrapper-push
       - name: Clone Public Repo - wrapper-push
         run: |
           git clone --depth 1 https://github.com/kimycai/wrapper-push.git
 
-      # 步骤4：创建临时目录，平级合并两个仓库所有内容（无嵌套、无遗漏）
+      # 步骤4：合并两个仓库到临时目录
       - name: Merge Repos to Temp Build Directory
         run: |
           mkdir -p temp-build
@@ -31,46 +30,53 @@ jobs:
           cp -rp wrapper-push/. temp-build/
           ls -lahpR temp-build/
 
-      # 步骤5：安装Go 1.23.0稳定版（手动安装，版本精准无兼容问题）
+      # 步骤5：安装Go 1.23.0稳定版
       - name: Install Go 1.23.0
         run: |
           wget -q https://dl.google.com/go/go1.23.0.linux-amd64.tar.gz
           sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.23.0.linux-amd64.tar.gz
           echo "PATH=/usr/local/go/bin:$PATH" >> $GITHUB_ENV
-          go version # 验证版本：go1.23.0 linux/amd64
+          go version
 
-      # 步骤6：严格按要求执行Go编译流程（初始化模块→下载依赖→编译可执行文件）
+      # 步骤6：Go编译（初始化模块→下载依赖→编译可执行文件）
       - name: Go Build (Init Mod → Tidy → Build)
         run: |
           cd temp-build
-          go mod init wrapper-manager  # 初始化Go模块，模块名固定
-          go mod tidy                  # 自动下载WebSocket、PTY及所有关联依赖
+          go mod init wrapper-manager
+          go mod tidy
           go build -o wrapper-manager .
+          ls -lh ./wrapper-manager
+          chmod +x ./wrapper-manager
 
-      # 步骤7：免密克隆你的自有仓库 kimycai/wrapper-web-manager（用于推送产物）
+      # 步骤7：免密克隆自有仓库 kimycai/wrapper-web-manager
       - name: Clone Own Repo - kimycai/wrapper-web-manager
         run: |
           git clone --depth 1 https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git
 
-      # 步骤8：复制编译产物到自有仓库，清理冗余文件（避免子模块箭头、无冗余）
-      - name: Copy Artifacts to Own Repo & Clean Redundancy
+      # 步骤8：复制产物到自有仓库【核心修复：保留.git/，仅清空其他内容】
+      - name: Copy Artifacts to Own Repo (Keep .git/)
         run: |
-          # 清空自有仓库原有所有内容，确保仅保留最新产物
-          rm -rf wrapper-web-manager/*
-          # 复制临时目录所有产物（合并文件+编译可执行文件）到自有仓库
+          cd wrapper-web-manager
+          # 关键修复1：仅删除仓库内所有普通文件/子目录，保留.git/隐藏文件夹
+          # !.git 表示排除.git目录，/* 表示匹配所有根目录内容
+          rm -rf !(.git)
+          # 回到上级目录，复制临时目录产物到自有仓库
+          cd ..
           cp -rp temp-build/. wrapper-web-manager/
-          # 删除隐藏.git目录（关键：避免GitHub标记为子模块，保持普通文件夹无箭头）
+          # 可选：删除产物中可能携带的.git目录（避免子模块，不影响主仓库.git/）
           rm -rf wrapper-web-manager/.git/ 2>/dev/null || true
-          # 验证自有仓库最终产物结构
+          # 验证产物结构
           ls -lahpR wrapper-web-manager/
 
-      # 步骤9：免密推送到你的远程仓库 kimycai/wrapper-web-manager:main
+      # 步骤9：免密推送到自有仓库【核心修复2：拉取最新代码，避免推送冲突】
       - name: Push Artifacts to kimycai/wrapper-web-manager
         run: |
           cd wrapper-web-manager
+          # 关键修复2：拉取远程最新代码，解决可能的分支冲突（必加）
+          git pull --rebase https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git main
           # 暂存所有变更
           git add .
-          # 提交变更（无变更时不报错，避免工作流中断）
+          # 提交变更（无变更时不报错）
           git commit -m "Manual build: merge wrapper-manager-v1+wrapper-push + compile wrapper-manager (Go1.23 | Ubuntu24.04)" || echo "No changes to commit"
-          # 免密推送到main分支（已固定为kimycai/wrapper-web-manager）
+          # 免密推送到main分支
           git push https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git main
