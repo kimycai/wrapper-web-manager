@@ -1,116 +1,115 @@
-name: Build st0rmMusicPlayer (Author Repo + FFmpeg 8.0)
+name: Build st0rmMusicPlayer (Author Repo + FFmpeg8.0 + Python3.9)
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # 手动触发
+  workflow_dispatch: # 手动触发（推荐，方便测试）
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     env:
-      # 定义版本常量（方便统一维护）
+      # 统一版本常量，方便维护
       FFMPEG_VERSION: 8.0
       NODE_VERSION: 18.x
-      PYTHON_VERSION: 3.9 # 严格按项目要求指定3.9
+      PYTHON_VERSION: 3.9
 
     steps:
-      # ===================== 步骤1：拉取作者公共仓库源码（含子模块） =====================
+      # 步骤1：拉取作者公共仓库源码（含子模块，严格按项目要求）
       - name: Clone author's st0rmMusicPlayer (public repo)
         uses: actions/checkout@v4
         with:
-          repository: sn0wst0rm/st0rmMusicPlayer # 替换为作者实际仓库名（用户名/仓库名）
-          ref: main # 作者仓库默认分支，需确认
-          submodules: recursive # 递归拉取子模块（严格按项目要求）
-          path: st0rmMusicPlayer # 拉取到指定目录
-          token: ${{ secrets.GITHUB_TOKEN }} # 公共仓库无需自定义PAT，用内置token即可
+          repository: sn0wst0rm/st0rmMusicPlayer # 作者实际仓库地址，无需修改
+          ref: main # 作者仓库默认分支
+          submodules: recursive # 等价于 git clone --recursive
+          path: st0rmMusicPlayer # 拉取到指定目录，方便后续操作
+          token: ${{ secrets.GITHUB_TOKEN }} # 公共仓库，内置token足够
 
-      # ===================== 步骤2：安装Python 3.9（严格版本，Ubuntu 24.04适配） =====================
-      - name: Install Python 3.9 (strict version)
+      # 步骤2：安装Python 3.9（修复pip缺失，严格按项目版本要求）
+      - name: Install Python 3.9 (fix pip missing)
         run: |
-          # 添加deadsnakes源（Ubuntu 24.04官方源无3.9，该源是官方维护的）
+          # 添加Ubuntu官方维护的deadsnakes源（唯一可靠的Python3.9适配源）
           sudo add-apt-repository -y ppa:deadsnakes/ppa
-          sudo apt update
-          # 严格安装Python 3.9全套依赖（按项目要求）
+          sudo apt update -y
+          # 安装Python3.9核心包（无python3.9-pip，该源不提供）
           sudo apt install -y --no-install-recommends \
             python3.9 \
             python3.9-venv \
-            python3.9-pip \
             python3.9-dev
-          # 验证版本（确保是3.9）
-          python3.9 --version
-          # 设置python3默认指向3.9（避免脚本调用python3时版本不符）
+          # 手动安装Python3.9专属pip（解决核心报错，替代python3.9-pip包）
+          python3.9 -m ensurepip --upgrade
+          # 验证pip安装成功（python3.9专属pip）
+          python3.9 -m pip --version
+          # 强制将系统python3/pip3指向3.9，确保项目脚本调用无版本问题
           sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 100
-          python3 --version
+          sudo update-alternatives --install /usr/bin/pip3 pip3 /usr/local/bin/pip3.9 100
+          # 最终版本验证
+          python3 --version && pip3 --version
 
-      # ===================== 步骤3：安装FFmpeg 8.0（预编译版，不编译） =====================
+      # 步骤3：安装FFmpeg 8.0（官方预编译版，不编译，直接可用）
       - name: Install FFmpeg 8.0 (prebuilt, no compile)
         run: |
-          # 创建临时目录存放FFmpeg
+          # 创建临时目录，避免污染工作目录
           mkdir -p ~/ffmpeg && cd ~/ffmpeg
-          # 下载FFmpeg 8.0 Linux x64预编译包（官方静态编译版）
-          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz -O ffmpeg-${FFMPEG_VERSION}.tar.xz
-          # 解压
-          tar -xf ffmpeg-${FFMPEG_VERSION}.tar.xz --strip-components=1
-          # 将ffmpeg/ffprobe移到系统PATH目录（全局可用）
+          # 下载FFmpeg 8.0 Linux x64官方静态预编译包（John Van Sickle，FFmpeg推荐）
+          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz -O ffmpeg.tar.xz
+          # 解压（--strip-components=1 去除外层目录，直接获取可执行文件）
+          tar -xf ffmpeg.tar.xz --strip-components=1
+          # 移到系统PATH目录（/usr/local/bin），实现全局调用
           sudo cp ffmpeg ffprobe /usr/local/bin/
-          # 验证版本（确保是8.0）
-          ffmpeg -version
-          ffprobe -version
-          # 清理临时文件
+          # 验证FFmpeg 8.0安装成功
+          ffmpeg -version | head -n1
+          # 清理临时文件，减小构建体积
           rm -rf ~/ffmpeg
 
-      # ===================== 步骤4：安装Node.js 18.x（严格版本） =====================
-      - name: Set up Node.js ${{ env.NODE_VERSION }} (strict version)
+      # 步骤4：安装Node.js 18.x（严格按项目要求，缓存依赖加速构建）
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }} # 严格指定18.x
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: st0rmMusicPlayer/package-lock.json # 精准缓存依赖
+          # 精准缓存项目npm依赖，避免重复下载
+          cache-dependency-path: st0rmMusicPlayer/package-lock.json
 
-      # ===================== 步骤5：项目初始化（严格按项目脚本） =====================
-      - name: Project initialization (strict setup)
+      # 步骤5：执行项目setup.sh（初始化依赖/数据库/构建，严格按项目流程）
+      - name: Run project setup script
         run: |
           cd st0rmMusicPlayer
-          # 赋予setup.sh执行权限
+          # 赋予脚本执行权限
           chmod +x ./setup.sh
-          # 复制示例环境变量（项目必需）
+          # 复制示例环境变量，项目运行必需
           cp .env.example .env
-          # 执行项目初始化脚本（严格按项目要求）
+          # 执行初始化脚本（安装Node/Python依赖、初始化Prisma、构建Next.js）
           ./setup.sh
-          # 验证依赖安装版本
-          npm --version
-          python3 --version
-          ffmpeg -version
 
-      # ===================== 步骤6：构建生产包（严格按项目命令） =====================
-      - name: Build production bundle (strict command)
+      # 步骤6：重新执行生产构建（确保编译完整，与项目原生命令一致）
+      - name: Build production bundle
         run: |
           cd st0rmMusicPlayer
-          npm run build # 严格执行项目自带的build命令
+          npm run build
 
-      # ===================== 步骤7：打包并上传产物 =====================
+      # 步骤7：打包编译产物（整理所有可运行文件，方便下载部署）
       - name: Package build artifacts
         run: |
           mkdir -p ./st0rmMusicPlayer-build
+          # 复制项目核心运行文件（含依赖、构建产物、配置）
           cp -r \
+            ./st0rmMusicPlayer/.next \
             ./st0rmMusicPlayer/node_modules \
-            ./st0rmMusicPlayer/build \
             ./st0rmMusicPlayer/public \
-            ./st0rmMusicPlayer/src \
             ./st0rmMusicPlayer/prisma \
             ./st0rmMusicPlayer/scripts \
             ./st0rmMusicPlayer/package.json \
             ./st0rmMusicPlayer/package-lock.json \
-            ./st0rmMusicPlayer/next.config.ts \
             ./st0rmMusicPlayer/.env \
             ./st0rmMusicPlayer/setup.sh \
             ./st0rmMusicPlayer-build/
 
+      # 步骤8：上传产物到GitHub Actions（可直接下载使用）
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: st0rmMusicPlayer-author-build-ffmpeg8.0
+          name: st0rmMusicPlayer-ffmpeg8.0-python3.9
           path: ./st0rmMusicPlayer-build
-          retention-days: 30
+          retention-days: 30 # 产物保留30天，可按需调整
