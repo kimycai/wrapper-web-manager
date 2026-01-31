@@ -1,4 +1,4 @@
-name: 'Build st0rmMusicPlayer (Stable: All Env + Env File Auto Match)'
+name: 'Build st0rmMusicPlayer (Stable: Prisma Compatible Env)'
 on:
   workflow_dispatch:
   push:
@@ -10,7 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     env:
-      NODE_VERSION: 18.x
+      # 核心升级：Node.js 20.19.0（LTS稳定版，满足Prisma最低要求，兼容所有依赖）
+      NODE_VERSION: 20.19.0
       PYTHON_VERSION: 3.9
       FFMPEG_VERSION: 8.0
 
@@ -24,6 +25,7 @@ jobs:
           path: st0rmMusicPlayer
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # 核心修改：安装Node.js 20.19.0（LTS版，Prisma官方兼容，缓存继续生效）
       - name: Set up Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
@@ -42,21 +44,22 @@ jobs:
         with:
           ffmpeg-version: ${{ env.FFMPEG_VERSION }}
 
-      - name: Verify all environments
+      # 环境验证：新增Node.js版本重点校验，确认满足Prisma要求
+      - name: Verify all environments (Prisma Compatible)
         run: |
-          echo "=== Node.js & NPM ==="
+          echo "=== Node.js & NPM (Prisma Required: 20.19+/22.12+/24.0+) ==="
           node -v && npm -v
           echo -e "\n=== Python & Pip ==="
           python --version && pip --version
           echo -e "\n=== FFmpeg & FFprobe ==="
           ffmpeg -version | head -n1 && ffprobe -version | head -n1
 
-      # 核心修改（方案2）：自动匹配常见.env示例文件，无则创建空文件，无任何报错
+      # 方案2：高兼容.env文件处理（自动匹配/创建，无文件不存在错误）
       - name: Run project setup script
         run: |
           cd st0rmMusicPlayer
           chmod +x ./setup.sh
-          # 自动匹配3种常见环境示例文件，按优先级复制，无则创建空.env并提示
+          # 自动匹配3种常见环境示例文件，无则创建空.env，带清晰日志
           if [ -f .env.example ]; then
             cp .env.example .env
             echo "✅ Copied .env.example to .env"
@@ -72,7 +75,13 @@ jobs:
           fi
           ./setup.sh
 
-      - name: Build production bundle (Next.js)
+      # Prisma构建前置：手动生成Prisma客户端（避免构建时版本兼容问题，可选但推荐）
+      - name: Generate Prisma Client (Pre-Build)
+        run: |
+          cd st0rmMusicPlayer
+          npx prisma generate
+
+      - name: Build production bundle (Next.js + Prisma)
         run: |
           cd st0rmMusicPlayer
           npm run build
@@ -80,12 +89,12 @@ jobs:
       - name: Package build artifacts
         run: |
           mkdir -p ./st0rmMusicPlayer-build
-          # 包含生成/复制的.env文件，产物完整无遗漏
+          # 包含Prisma相关目录+生成的.env文件，产物完整可直接部署
           cp -r ./st0rmMusicPlayer/.next ./st0rmMusicPlayer/node_modules ./st0rmMusicPlayer/public ./st0rmMusicPlayer/prisma ./st0rmMusicPlayer/scripts ./st0rmMusicPlayer/package.json ./st0rmMusicPlayer/package-lock.json ./st0rmMusicPlayer/.env ./st0rmMusicPlayer/setup.sh ./st0rmMusicPlayer-build/
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: st0rmMusicPlayer-stable-env
+          name: st0rmMusicPlayer-prisma-compatible-env
           path: ./st0rmMusicPlayer-build
           retention-days: 30
