@@ -1,39 +1,38 @@
-name: Push temp-build to kimycai/wrapper-web-manager
+name: Build & Push temp-build to wrapper-web-manager
 on:
-  workflow_dispatch: # 仅手动触发，无自动执行
+  workflow_dispatch: # 仅手动触发，灵活控制执行时机
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04 # 匹配Go1.23编译环境，与之前一致
     steps:
-      # 步骤1：配置Git身份（推送必备，标识提交者）
-      - name: Configure Git Identity
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
+      # 步骤1：拉取当前配置所在的仓库（Actions标准前置步骤，无需修改）
+      - uses: actions/checkout@v4
 
-      # 步骤2：匿名克隆双公有仓库（无需Token，仅最新版本）
+      # 步骤2：匿名克隆双公有仓库（无需Token，直接拉取最新版本）
       - name: Clone Public Repos
         run: |
           git clone --depth 1 https://github.com/sky8282/wrapper-manager-v1.git
           git clone --depth 1 https://github.com/kimycai/wrapper-push.git
 
-      # 步骤3：合并到temp-build（产物最终生成目录，核心）
+      # 步骤3：合并仓库到temp-build（产物核心目录，与之前一致）
       - name: Merge to temp-build Directory
         run: |
           mkdir -p temp-build
           cp -rp wrapper-manager-v1/. temp-build/
           cp -rp wrapper-push/. temp-build/
+          # 验证合并结果，确保文件完整
+          ls -lh temp-build/
 
-      # 步骤4：安装Go 1.23.0（版本精准，适配Ubuntu24.04）
+      # 步骤4：安装Go 1.23.0稳定版（版本精准，适配Ubuntu24.04）
       - name: Install Go 1.23.0
         run: |
           wget -q https://dl.google.com/go/go1.23.0.linux-amd64.tar.gz
           sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.23.0.linux-amd64.tar.gz
           echo "PATH=/usr/local/go/bin:$PATH" >> $GITHUB_ENV
-          go version
+          go version # 验证Go版本，确保编译环境正确
 
-      # 步骤5：Go编译（产物落地temp-build，完整保留）
+      # 步骤5：Go编译核心流程（产物落地temp-build，保留可执行权限）
       - name: Go Build (Init → Tidy → Build)
         run: |
           cd temp-build
@@ -41,29 +40,41 @@ jobs:
           go mod tidy
           go build -o wrapper-manager .
           chmod +x ./wrapper-manager
-          ls -lahp ./ # 验证产物：查看文件列表+可执行权限
+          # 验证编译产物，查看文件列表+可执行权限
+          ls -lahp ./
 
-      # 步骤6：克隆自有仓库（获取带.git的本地副本，推送唯一载体）
-      - name: Clone Own Repo - kimycai/wrapper-web-manager
+      # 步骤6：配置Git全局身份（Actions推送标准配置，必备）
+      - name: Configure Git Global Identity
         run: |
-          git clone https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
 
-      # 步骤7：核心：清空自有仓库+复制temp-build所有内容到根目录
-      - name: Copy temp-build to Own Repo Root
+      # 步骤7：核心：用actions/checkout@v4拉取wrapper-web-manager仓库（成功关键）
+      - name: Checkout wrapper-web-manager Repository
+        uses: actions/checkout@v4
+        with:
+          repository: kimycai/wrapper-web-manager # 你的目标仓库，固定
+          ref: main                                # 推送到main分支
+          token: ${{ secrets.WRAPPER_PUSH_TOKEN }} # 已配置的授权令牌
+          path: wrapper-web-manager                # 独立工作目录，隔离所有操作
+          fetch-depth: 1                           # 浅克隆，提升速度，Action自动兼容
+
+      # 步骤8：复制temp-build产物到目标仓库，保留权限+验证结果
+      - name: Copy temp-build Files to wrapper-web-manager
+        run: |
+          # 递归复制产物，-p保留文件权限（如wrapper的可执行权限）
+          cp -rp temp-build/* wrapper-web-manager/
+          # 进入目标仓库，验证复制结果
+          cd wrapper-web-manager
+          ls -lahp ./ # 确认产物完整，无嵌套
+
+      # 步骤9：提交+推送变更，容错处理（无变更不中断流程）
+      - name: Commit & Push to wrapper-web-manager
         run: |
           cd wrapper-web-manager
-          # 清空根目录所有非.git内容，保留Git仓库核心
-          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-          cd ..
-          # 直接复制temp-build根内容到自有仓库根目录，无任何嵌套
-          cp -rp temp-build/. wrapper-web-manager/
-
-      # 步骤8：极简推送（解决浅克隆冲突，确保推送成功）
-      - name: Push to kimycai/wrapper-web-manager
-        run: |
-          cd wrapper-web-manager
+          # 暂存所有变更
           git add .
-          git commit -m "Push temp-build: wrapper-manager build (Go1.23 | Ubuntu24.04)" || echo "No changes to commit"
-          # 拉取远程最新代码并合并，自动解决冲突，适配所有场景
-          git pull --rebase https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git main --allow-unrelated-histories 2>/dev/null || true
-          git push https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git main
+          # 提交变更，无新修改则跳过（避免工作流报错）
+          git commit -m "Update from temp-build: Go1.23 build - ${GITHUB_SHA:0:7}" || echo "No changes to commit"
+          # 推送变更，基于Action自动关联的origin，无需手动拼接地址
+          git push origin main
