@@ -1,36 +1,31 @@
 name: Wrapper-Manager Build & Push to kimycai/wrapper-web-manager
 on:
-  workflow_dispatch: # 仅手动触发
+  workflow_dispatch: # 仅手动触发，无自动执行
 
 jobs:
   build-and-push:
     runs-on: ubuntu-24.04
     steps:
-      # 步骤1：配置Git全局身份（推送必备）
+      # 步骤1：配置Git身份（推送仓库必备，标识提交者）
       - name: Configure Git Identity
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      # 步骤2：匿名克隆公有仓库 sky8282/wrapper-manager-v1
-      - name: Clone Public Repo - wrapper-manager-v1
+      # 步骤2：匿名克隆双公有仓库（无需Token，仅最新版本）
+      - name: Clone Public Repos
         run: |
           git clone --depth 1 https://github.com/sky8282/wrapper-manager-v1.git
-
-      # 步骤3：匿名克隆公有仓库 kimycai/wrapper-push
-      - name: Clone Public Repo - wrapper-push
-        run: |
           git clone --depth 1 https://github.com/kimycai/wrapper-push.git
 
-      # 步骤4：合并两个仓库到临时目录
-      - name: Merge Repos to Temp Build Directory
+      # 步骤3：合并仓库到临时目录（平级合并，无嵌套）
+      - name: Merge to Temp Build Directory
         run: |
           mkdir -p temp-build
           cp -rp wrapper-manager-v1/. temp-build/
           cp -rp wrapper-push/. temp-build/
-          ls -lahpR temp-build/
 
-      # 步骤5：安装Go 1.23.0稳定版
+      # 步骤4：安装Go 1.23.0（手动安装，版本精准）
       - name: Install Go 1.23.0
         run: |
           wget -q https://dl.google.com/go/go1.23.0.linux-amd64.tar.gz
@@ -38,45 +33,39 @@ jobs:
           echo "PATH=/usr/local/go/bin:$PATH" >> $GITHUB_ENV
           go version
 
-      # 步骤6：Go编译（初始化模块→下载依赖→编译可执行文件）
-      - name: Go Build (Init Mod → Tidy → Build)
+      # 步骤5：Go编译核心流程（按要求执行，生成可执行文件）
+      - name: Go Build (Init → Tidy → Build)
         run: |
           cd temp-build
           go mod init wrapper-manager
           go mod tidy
           go build -o wrapper-manager .
-          ls -lh ./wrapper-manager
           chmod +x ./wrapper-manager
 
-      # 步骤7：免密克隆自有仓库 kimycai/wrapper-web-manager
+      # 步骤6：克隆自有仓库（获取本地Git副本，用于推送，核心步骤）
       - name: Clone Own Repo - kimycai/wrapper-web-manager
         run: |
           git clone --depth 1 https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git
 
-      # 步骤8：复制产物到自有仓库【核心修复：保留.git/，仅清空其他内容】
-      - name: Copy Artifacts to Own Repo (Keep .git/)
+      # 步骤7：清空自有仓库（保留.git/）+ 复制产物
+      - name: Copy Artifacts to Own Repo
         run: |
           cd wrapper-web-manager
-          # 关键修复1：仅删除仓库内所有普通文件/子目录，保留.git/隐藏文件夹
-          # !.git 表示排除.git目录，/* 表示匹配所有根目录内容
-          rm -rf !(.git)
-          # 回到上级目录，复制临时目录产物到自有仓库
+          # 基础命令清空，仅保留.git/，无兼容问题
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           cd ..
           cp -rp temp-build/. wrapper-web-manager/
-          # 可选：删除产物中可能携带的.git目录（避免子模块，不影响主仓库.git/）
+          # 删除产物中可能的.git（避免子模块，不影响主仓库）
           rm -rf wrapper-web-manager/.git/ 2>/dev/null || true
-          # 验证产物结构
-          ls -lahpR wrapper-web-manager/
 
-      # 步骤9：免密推送到自有仓库【核心修复2：拉取最新代码，避免推送冲突】
-      - name: Push Artifacts to kimycai/wrapper-web-manager
+      # 步骤8：免密推送到远程仓库（拉取最新代码，避免冲突）
+      - name: Push to kimycai/wrapper-web-manager
         run: |
           cd wrapper-web-manager
-          # 关键修复2：拉取远程最新代码，解决可能的分支冲突（必加）
+          # 拉取远程最新代码，解决分支冲突（自动化推送必加）
           git pull --rebase https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git main
-          # 暂存所有变更
           git add .
-          # 提交变更（无变更时不报错）
-          git commit -m "Manual build: merge wrapper-manager-v1+wrapper-push + compile wrapper-manager (Go1.23 | Ubuntu24.04)" || echo "No changes to commit"
+          # 提交（无变更时不报错，避免流程中断）
+          git commit -m "Manual build: merge + compile wrapper-manager (Go1.23 | Ubuntu24.04)" || echo "No changes to commit"
           # 免密推送到main分支
           git push https://${{ secrets.WRAPPER_PUSH_TOKEN }}@github.com/kimycai/wrapper-web-manager.git main
