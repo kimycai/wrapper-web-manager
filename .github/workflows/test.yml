@@ -1,0 +1,81 @@
+name: Build st0rmMusicPlayer and Upload Artifacts
+
+# 触发条件：可按需修改（如 push 到 main 分支、手动触发）
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # 手动触发
+
+# 运行环境
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      # 步骤1：设置运行环境（Node.js + Python + 系统依赖）
+      - name: Set up system dependencies
+        run: |
+          # 更新系统并安装基础依赖（FFmpeg、Python venv、git 等）
+          sudo apt update && sudo apt upgrade -y
+          sudo apt install -y --no-install-recommends \
+            ffmpeg \
+            python3.9 python3.9-venv python3.9-pip \
+            git build-essential libssl-dev curl wget
+
+      # 步骤2：设置 Node.js 环境（匹配项目要求的 18.x 版本）
+      - name: Set up Node.js 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.x'
+          cache: 'npm' # 缓存 npm 依赖，加速构建
+
+      # 步骤3：克隆代码（含子模块）
+      - name: Clone repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive # 递归拉取所有子模块
+          fetch-depth: 0 # 拉取完整提交历史（可选，按需）
+
+      # 步骤4：执行 setup.sh 初始化项目（核心：安装依赖、初始化数据库等）
+      - name: Run setup script
+        run: |
+          # 赋予脚本执行权限
+          chmod +x ./setup.sh
+          # 执行 setup.sh（若脚本有交互，需提前配置 .env）
+          # 注：若 setup.sh 依赖 .env 文件，需先创建（可通过 Secrets 注入）
+          cp .env.example .env # 复制示例环境变量（按需修改）
+          ./setup.sh
+
+      # 步骤5：构建项目（确保生产环境构建完成）
+      - name: Build production bundle
+        run: |
+          npm run build # 执行 Next.js 构建（项目核心编译步骤）
+
+      # 步骤6：打包编译后的产物（梳理需要上传的目录）
+      - name: Package build artifacts
+        run: |
+          # 创建产物目录，整理需要保留的文件
+          mkdir -p ./build-artifacts
+          # 复制核心产物（根据项目结构调整，以下是 st0rmMusicPlayer 核心文件）
+          cp -r \
+            ./node_modules \
+            ./build \
+            ./public \
+            ./src \
+            ./prisma \
+            ./scripts \
+            ./package.json \
+            ./package-lock.json \
+            ./next.config.js \
+            ./.env \
+            ./setup.sh \
+            ./build-artifacts/
+
+      # 步骤7：上传产物到 GitHub Actions Artifacts
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: st0rmMusicPlayer-build # 产物包名称
+          path: ./build-artifacts # 要上传的产物目录
+          retention-days: 30 # 产物保留天数（可选，默认90天）
