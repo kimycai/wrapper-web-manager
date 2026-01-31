@@ -1,4 +1,4 @@
-name: 'Build st0rmMusicPlayer (Stable: All Action Env)'
+name: 'Build st0rmMusicPlayer (Stable: All Env + Env Skip Fix)'
 on:
   workflow_dispatch:
   push:
@@ -13,7 +13,7 @@ jobs:
       NODE_VERSION: 18.x
       PYTHON_VERSION: 3.9
       FFMPEG_VERSION: 8.0
-  
+
     steps:
       - name: Clone st0rmMusicPlayer repo
         uses: actions/checkout@v4
@@ -24,7 +24,6 @@ jobs:
           path: st0rmMusicPlayer
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 稳定方案1：Node.js 官方 Action（保留原优秀配置，缓存生效）
       - name: Set up Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
@@ -32,37 +31,31 @@ jobs:
           cache: 'npm'
           cache-dependency-path: st0rmMusicPlayer/package-lock.json
 
-      # 稳定方案2：Python 官方 Action（彻底替代手动apt/软链接，零冲突）
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip' # 可选：缓存pip依赖，加速构建
-          # 关键：自动隔离环境，python/pip命令直接绑定目标版本，无系统干扰
+          cache: 'pip'
 
-      # 稳定方案3：FFmpeg 社区成熟 Action（彻底替代手动下载/解压/复制）
       - name: Set up FFmpeg ${{ env.FFMPEG_VERSION }}
         uses: FedericoCarboni/setup-ffmpeg@v2
         with:
           ffmpeg-version: ${{ env.FFMPEG_VERSION }}
-          # 自动下载预编译静态包，配置全局PATH，ffmpeg/ffprobe直接调用，无路径问题
 
-      # 可选：环境验证（Action 搭建的环境，几乎100%成功，验证仅作确认）
-      - name: Verify all environments (stable)
+      - name: Verify all environments
         run: |
           echo "=== Node.js & NPM ==="
           node -v && npm -v
           echo -e "\n=== Python & Pip ==="
-          python --version && pip --version # Action 自动将python/pip绑定目标版本
+          python --version && pip --version
           echo -e "\n=== FFmpeg & FFprobe ==="
           ffmpeg -version | head -n1 && ffprobe -version | head -n1
 
-      # 原项目所有业务逻辑，完全保留，无需任何修改
+      # 核心修改（方案3）：跳过.env创建，直接执行setup.sh（脚本自身处理环境配置）
       - name: Run project setup script
         run: |
           cd st0rmMusicPlayer
           chmod +x ./setup.sh
-          cp .env.example .env
           ./setup.sh
 
       - name: Build production bundle (Next.js)
@@ -73,7 +66,8 @@ jobs:
       - name: Package build artifacts
         run: |
           mkdir -p ./st0rmMusicPlayer-build
-          cp -r ./st0rmMusicPlayer/.next ./st0rmMusicPlayer/node_modules ./st0rmMusicPlayer/public ./st0rmMusicPlayer/prisma ./st0rmMusicPlayer/scripts ./st0rmMusicPlayer/package.json ./st0rmMusicPlayer/package-lock.json ./st0rmMusicPlayer/.env ./st0rmMusicPlayer/setup.sh ./st0rmMusicPlayer-build/
+          cp -r ./st0rmMusicPlayer/.next ./st0rmMusicPlayer/node_modules ./st0rmMusicPlayer/public ./st0rmMusicPlayer/prisma ./st0rmMusicPlayer/scripts ./st0rmMusicPlayer/package.json ./st0rmMusicPlayer/package-lock.json ./st0rmMusicPlayer/setup.sh ./st0rmMusicPlayer-build/
+          # 注：已移除.env复制（因未手动创建，由setup.sh自行生成/处理）
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
