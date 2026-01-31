@@ -1,104 +1,74 @@
-name: 'Build st0rmMusicPlayer (Final: 100% Stable No Interactive)'
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+name: st0rmMusic Setup & Build
 
+# 触发条件：push到main分支、手动触发、PR到main分支
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # 手动触发
+
+# 作业定义
 jobs:
-  build:
-    runs-on: ubuntu-24.04
-    env:
-      # 核心环境配置（Prisma兼容+全工具稳定版）
-      NODE_VERSION: 20.19.0
-      PYTHON_VERSION: 3.9
-      FFMPEG_VERSION: 8.0
-      # 关键新增：预配置数据库路径环境变量，跳过setup.sh交互式输入
-      # 路径使用脚本默认值，与报错日志中一致，无需修改
-      LIBRARY_DB_PATH: /home/runner/work/wrapper-web-manager/wrapper-web-manager/st0rmMusicPlayer/library.db
+  setup-and-build:
+    # 支持多系统（Ubuntu优先，macOS可选）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest] # 可移除macos-latest减少耗时
 
     steps:
-      - name: Clone st0rmMusicPlayer repo
+      # 步骤1：拉取代码仓库
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          repository: sn0wst0rm/st0rmMusicPlayer
-          ref: main
-          submodules: recursive
-          path: st0rmMusicPlayer
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
+      # 步骤2：设置Node.js环境（匹配setup.sh要求的18+）
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: st0rmMusicPlayer/package-lock.json
+          node-version: '18' # 最低要求18，也可设20（LTS）
+          cache: 'npm' # 缓存npm依赖，加速构建
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      # 步骤3：设置Python环境（匹配setup.sh要求的3.9+）
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+          python-version: '3.9' # 最低要求3.9，也可设3.11（稳定版）
+          cache: 'pip' # 缓存pip依赖
 
-      - name: Set up FFmpeg ${{ env.FFMPEG_VERSION }}
-        uses: FedericoCarboni/setup-ffmpeg@v2
-        with:
-          ffmpeg-version: ${{ env.FFMPEG_VERSION }}
-
-      - name: Verify all environments
+      # 步骤4：安装系统级依赖（仅Ubuntu需要）
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          echo "=== Node.js & NPM (Prisma Compatible) ==="
-          node -v && npm -v
-          echo -e "\n=== Python & Pip ==="
-          python --version && pip --version
-          echo -e "\n=== FFmpeg & FFprobe ==="
-          ffmpeg -version | head -n1 && ffprobe -version | head -n1
-          echo -e "\n=== Preconfigured Env Variables ==="
-          echo "LIBRARY_DB_PATH: ${{ env.LIBRARY_DB_PATH }}"
+          sudo apt update
+          sudo apt install -y python3-venv # 满足setup.sh的python3-venv检查
 
-      # 方案2：高兼容.env文件处理（无文件不存在错误）
-      - name: Run project setup script (No Interactive)
+      # 步骤5：赋予setup.sh执行权限
+      - name: Make setup.sh executable
+        run: chmod +x st0rmMusicPlayer/setup.sh
+
+      # 步骤6：非交互式运行setup.sh（关键：跳过手动输入数据库路径）
+      - name: Run setup script (non-interactive)
         run: |
+          # 预设数据库路径，避免交互式输入（覆盖setup.sh的read逻辑）
+          echo "DEFAULT_DB_PATH=${{ github.workspace }}/library.db" > .env.tmp
+          export USER_DB_PATH="${{ github.workspace }}/library.db"
+          
+          # 运行setup.sh并输出详细日志
           cd st0rmMusicPlayer
-          chmod +x ./setup.sh
-          # 自动匹配.env示例文件，无则创建空文件
-          if [ -f .env.example ]; then
-            cp .env.example .env
-            echo "✅ Copied .env.example to .env"
-          elif [ -f .env.sample ]; then
-            cp .env.sample .env
-            echo "✅ Copied .env.sample to .env"
-          elif [ -f .env.example.dist ]; then
-            cp .env.example.dist .env
-            echo "✅ Copied .env.example.dist to .env"
-          else
-            touch .env
-            echo "⚠️  No env example file found, created empty .env file"
-          fi
-          # 关键：将预配置的数据库路径写入.env（确保脚本能读取到）
-          echo "LIBRARY_DB_PATH=${{ env.LIBRARY_DB_PATH }}" >> .env
-          # 执行脚本（已无交互式输入，自动执行）
-          ./setup.sh
+          bash -x ./setup.sh
+        env:
+          # 强制非交互模式，避免脚本等待输入
+          CI: true
 
-      - name: Generate Prisma Client (Pre-Build Optimization)
-        run: |
-          cd st0rmMusicPlayer
-          npx prisma generate
-
-      - name: Build production bundle (Next.js + Prisma)
-        run: |
-          cd st0rmMusicPlayer
-          npm run build
-
-      - name: Package build artifacts
-        run: |
-          mkdir -p ./st0rmMusicPlayer-build
-          cp -r ./st0rmMusicPlayer/.next ./st0rmMusicPlayer/node_modules ./st0rmMusicPlayer/public ./st0rmMusicPlayer/prisma ./st0rmMusicPlayer/scripts ./st0rmMusicPlayer/package.json ./st0rmMusicPlayer/package-lock.json ./st0rmMusicPlayer/.env ./st0rmMusicPlayer/setup.sh ./st0rmMusicPlayer/library.db ./st0rmMusicPlayer-build/
-
+      # 步骤7：上传构建产物（可选，用于部署/下载）
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: st0rmMusicPlayer-100-stable
-          path: ./st0rmMusicPlayer-build
-          retention-days: 30
+          name: st0rmMusic-build-${{ matrix.os }}
+          path: |
+            st0rmMusicPlayer/.next/ # Next.js构建产物
+            st0rmMusicPlayer/scripts/venv/ # Python虚拟环境
+            st0rmMusicPlayer/library.db # 生成的数据库文件
+            st0rmMusicPlayer/.env # 生成的环境文件
+          retention-days: 7 # 产物保留7天，可按需调整
