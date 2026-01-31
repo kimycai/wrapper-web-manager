@@ -13,8 +13,7 @@ jobs:
       NODE_VERSION: 18.x
       PYTHON_VERSION: 3.9
       FFMPEG_VERSION: 8.0
-    fail-fast: true # 步骤失败立即终止，节省资源
-
+  
     steps:
       - name: Clone st0rmMusicPlayer repo
         uses: actions/checkout@v4
