@@ -1,4 +1,4 @@
-name: Build st0rmMusicPlayer (Final: No Syntax Error)
+name: Build st0rmMusicPlayer
 on:
   workflow_dispatch:
   push:
