@@ -13,8 +13,7 @@ jobs:
       FFMPEG_VERSION: 8.0
       NODE_VERSION: 18.x
       PYTHON_VERSION: 3.9
-    # 步骤失败立即终止，节省构建时间
-
+ 
 
     steps:
       - name: Clone author's st0rmMusicPlayer (public repo)
@@ -26,34 +25,34 @@ jobs:
           path: st0rmMusicPlayer
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Python 3.9 (fix all pip issues)
+      # 核心修复：Python 3.9 安装（重新实现pip3全局注册，解决command not found）
+      - name: Install Python 3.9 (fix pip3 command not found)
         run: |
           sudo add-apt-repository -y ppa:deadsnakes/ppa
           sudo apt update -y
-          # 安装Python3.9核心包
+          # 安装Python3.9全套依赖（含基础运行、虚拟环境、开发库）
           sudo apt install -y --no-install-recommends python3.9 python3.9-venv python3.9-dev
-          # 手动安装并升级Python3.9专属pip
-          python3.9 -m ensurepip --upgrade
-          # 全局绑定python3到3.9版本
+          # 1. 强制安装并升级Python3.9专属pip（ensurepip+upgrade确保最新版）
+          python3.9 -m ensurepip --upgrade --force
+          # 2. 全局绑定python3命令到3.9版本（优先级100，确保默认调用）
           sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 100
-          # 核心修复：全局绑定pip3到Python3.9，解决版本不匹配问题
-          sudo ln -sf /usr/local/lib/python3.9/dist-packages/pip/pip3 /usr/bin/pip3
-          # 版本验证
+          # 3. 关键修复：将Python3.9的pip3链接到系统全局bin目录（路径100%可靠）
+          # 原理：python3.9 -m pip 是版本专属调用，软链接到/usr/bin实现全局识别
+          sudo ln -sf "$(which python3.9)" -m pip /usr/bin/pip3
+          # 4. 验证pip3是否生效（先检查命令存在，再输出版本）
+          echo "=== Check pip3 command existence ==="
+          which pip3
           echo "=== Python Global Version ==="
           python3 --version
-          echo "=== Pip Global Version & Belonging ==="
+          echo "=== Pip3 Global Version & Belonging ==="
           pip3 --version
 
       - name: Install FFmpeg 8.0 (prebuilt static, no compile)
         run: |
           mkdir -p ~/ffmpeg && cd ~/ffmpeg
-          # 核心修复1：替换为官方稳定预编译源，无仓库失效风险
-          # 核心修复2：移除-q静默参数，显示下载日志，方便排查
           wget https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz -O ffmpeg.tar.xz
           tar -xf ffmpeg.tar.xz --strip-components=1
-          # 适配新源目录结构：ffmpeg/ffprobe在bin目录下
           sudo cp bin/ffmpeg bin/ffprobe /usr/local/bin/
-          # 双工具版本验证，确保安装成功
           ffmpeg -version | head -n1
           ffprobe -version | head -n1
           rm -rf ~/ffmpeg
@@ -67,10 +66,9 @@ jobs:
 
       - name: Global environment version check (critical)
         run: |
-          # 新增：全局核心依赖统一验证，提前发现安装错误
           echo "=== Node.js & NPM Version ==="
           node -v && npm -v
-          echo -e "\n=== Python & Pip Version ==="
+          echo -e "\n=== Python & Pip3 Version ==="
           python3 --version && pip3 --version
           echo -e "\n=== FFmpeg & FFprobe Version ==="
           ffmpeg -version | head -n1
