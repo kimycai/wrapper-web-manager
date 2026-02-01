@@ -20,38 +20,39 @@ jobs:
           path: st0rmMusicPlayer
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 步骤2：下载并配置FFmpeg（核心修复：完善curl参数+文件校验）
-      - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载，带容错）
+      # 步骤2：下载并配置FFmpeg（核心修复：环境变量即时生效+双重验证）
+      - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载，稳定版）
         run: |
           # 定义FFmpeg下载地址（与需求完全一致）
           FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
-          # 核心优化：完整curl参数，确保下载成功
-          # -L 强制跟随重定向（GitHub Release链接必配）
-          # -O 保留远程文件名（避免重命名错误）
-          # -S 显示错误信息（下载失败时定位问题）
-          # -f 下载失败直接报错（非200状态码立即退出）
+          # 完整curl参数：跟随重定向+显示进度+失败报错+保留原文件名
           curl -L -O -S -f $FFMPEG_URL
           
-          # 关键校验：确认压缩包存在，避免解压空文件
-          if [ ! -f "ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz" ]; then
+          # 校验压缩包是否存在，避免解压失败
+          FFMPEG_TAR="ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
+          if [ ! -f "$FFMPEG_TAR" ]; then
             echo "ERROR: FFmpeg压缩包下载失败，文件不存在！"
-            ls -l # 列出当前目录文件，便于调试
+            ls -l # 列出目录文件，便于调试
             exit 1
           fi
 
-          # 解压到/opt/ffmpeg（系统级目录，全局可用）
+          # 解压到系统级目录/opt/ffmpeg，去掉顶层目录避免路径嵌套
           sudo mkdir -p /opt/ffmpeg
-          # 解压：-xJf适配xz格式，--strip-components=1去掉顶层目录
-          sudo tar -xJf ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz -C /opt/ffmpeg --strip-components=1
+          sudo tar -xJf "$FFMPEG_TAR" -C /opt/ffmpeg --strip-components=1
           
-          # 将FFmpeg可执行目录添加到Action全局PATH（核心，确保全局调用）
+          # 1. 配置Action全局PATH（对后续所有步骤生效）
           echo "/opt/ffmpeg/bin" >> $GITHUB_PATH
+          # 2. 核心修复：手动刷新环境变量，让当前步骤即时识别ffmpeg
+          export PATH="/opt/ffmpeg/bin:$PATH"
           
-          # 验证FFmpeg安装成功
+          # 双重验证FFmpeg安装成功（兜底+确保可用）
           echo "=== FFmpeg安装验证 ==="
+          # 方式1：直接调用（验证环境变量生效）
           ffmpeg -version
           ffprobe -version
-          echo "=== FFmpeg安装完成 ==="
+          # 方式2：绝对路径调用（兜底方案，避免环境变量问题）
+          /opt/ffmpeg/bin/ffmpeg -version
+          echo "=== FFmpeg安装完成，全局可用 ==="
 
       # 步骤3：配置Node.js 20.19.0（适配Prisma，解决版本兼容）
       - name: 配置Node.js 20.19.0
@@ -96,7 +97,7 @@ jobs:
           cd st0rmMusicPlayer
           npm run build --webpack
 
-      # 步骤10：上传构建产物（含所有运行依赖）
+      # 步骤10：上传构建产物（含所有运行依赖，方便部署）
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
