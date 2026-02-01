@@ -24,7 +24,7 @@ jobs:
       - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载）
         run: |
           # 定义FFmpeg下载地址（与需求完全一致）
-          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
+          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
           # 下载FFmpeg包（-q 静默下载，-O 重命名为ffmpeg.tar.xz）
           curl -q -L -O $FFMPEG_URL
           # 解压到/opt/ffmpeg（系统级目录，方便全局调用）
