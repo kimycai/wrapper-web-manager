@@ -8,9 +8,9 @@ on:
 
 jobs:
   build-st0rm-music:
-    runs-on: ubuntu-latest # 适配FFmpeg Linux64包，脚本原生兼容
+    runs-on: ubuntu-latest # 适配FFmpeg Linux64静态包
     steps:
-      # 步骤1：拉取仓库（含子模块，st0rmMusic核心依赖，必配）
+      # 步骤1：拉取仓库（含子模块，核心依赖）
       - name: 拉取st0rmMusicPlayer仓库（含子模块）
         uses: actions/checkout@v4
         with:
@@ -20,23 +20,40 @@ jobs:
           path: st0rmMusicPlayer
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 步骤2：下载并配置FFmpeg（核心新增，从指定地址获取静态包）
-      - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载）
+      # 步骤2：下载并配置FFmpeg（核心修复：完善curl参数+文件校验）
+      - name: 安装FFmpeg（从BtbN/FFmpeg-Builds下载，带容错）
         run: |
           # 定义FFmpeg下载地址（与需求完全一致）
-          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
-          # 下载FFmpeg包（-q 静默下载，-O 重命名为ffmpeg.tar.xz）
-          curl -q -L -O $FFMPEG_URL
-          # 解压到/opt/ffmpeg（系统级目录，方便全局调用）
+          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz"
+          # 核心优化：完整curl参数，确保下载成功
+          # -L 强制跟随重定向（GitHub Release链接必配）
+          # -O 保留远程文件名（避免重命名错误）
+          # -S 显示错误信息（下载失败时定位问题）
+          # -f 下载失败直接报错（非200状态码立即退出）
+          curl -L -O -S -f $FFMPEG_URL
+          
+          # 关键校验：确认压缩包存在，避免解压空文件
+          if [ ! -f "ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz" ]; then
+            echo "ERROR: FFmpeg压缩包下载失败，文件不存在！"
+            ls -l # 列出当前目录文件，便于调试
+            exit 1
+          fi
+
+          # 解压到/opt/ffmpeg（系统级目录，全局可用）
           sudo mkdir -p /opt/ffmpeg
-          sudo tar -xJf ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1
-          # 将FFmpeg可执行目录添加到系统PATH（全局可调用ffmpeg/ffprobe）
+          # 解压：-xJf适配xz格式，--strip-components=1去掉顶层目录
+          sudo tar -xJf ffmpeg-n8.0-latest-linux64-lgpl-8.0.tar.xz -C /opt/ffmpeg --strip-components=1
+          
+          # 将FFmpeg可执行目录添加到Action全局PATH（核心，确保全局调用）
           echo "/opt/ffmpeg/bin" >> $GITHUB_PATH
-          # 验证FFmpeg安装（输出版本，确认可用）
+          
+          # 验证FFmpeg安装成功
+          echo "=== FFmpeg安装验证 ==="
           ffmpeg -version
           ffprobe -version
+          echo "=== FFmpeg安装完成 ==="
 
-      # 步骤3：配置Node.js 20.19.0（适配Prisma，解决此前版本兼容问题）
+      # 步骤3：配置Node.js 20.19.0（适配Prisma，解决版本兼容）
       - name: 配置Node.js 20.19.0
         uses: actions/setup-node@v4
         with:
@@ -44,7 +61,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: st0rmMusicPlayer/package-lock.json
 
-      # 步骤4：配置Python 3.9（匹配setup.sh脚本强制要求）
+      # 步骤4：配置Python 3.9（匹配setup.sh要求）
       - name: 配置Python 3.9
         uses: actions/setup-python@v5
         with:
@@ -55,32 +72,31 @@ jobs:
       - name: 安装系统级依赖
         run: sudo apt update && sudo apt install -y python3-venv
 
-      # 步骤6：赋予setup.sh执行权限（避免权限拒绝错误）
+      # 步骤6：赋予setup.sh执行权限
       - name: 赋予安装脚本执行权限
         run: chmod +x st0rmMusicPlayer/setup.sh
 
-      # 步骤7：无交互执行setup.sh（echo ""模拟回车，跳过数据库路径交互）
+      # 步骤7：无交互执行setup.sh（echo ""模拟回车，跳过数据库交互）
       - name: 无交互执行安装脚本
         run: |
           cd st0rmMusicPlayer
-          # 模拟用户回车，使用默认数据库路径，核心解决交互问题
           echo "" | bash ./setup.sh
         env:
           CI: true # 标记CI环境，避免脚本等待手动输入
 
-      # 步骤8：修复缺失依赖@tailwindcss/postcss（解决Next.js CSS编译报错）
+      # 步骤8：修复缺失依赖@tailwindcss/postcss（解决CSS编译报错）
       - name: 安装缺失的Tailwind PostCSS依赖
         run: |
           cd st0rmMusicPlayer
           npm install @tailwindcss/postcss --save-dev
 
-      # 步骤9：构建Next.js生产包（带--webpack参数，匹配项目原构建命令）
+      # 步骤9：构建Next.js生产包（带--webpack参数，匹配项目命令）
       - name: 构建Next.js生产产物
         run: |
           cd st0rmMusicPlayer
           npm run build --webpack
 
-      # 步骤10：上传构建产物（含所有运行依赖，方便下载部署）
+      # 步骤10：上传构建产物（含所有运行依赖）
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
@@ -92,6 +108,4 @@ jobs:
             st0rmMusicPlayer/.env
             st0rmMusicPlayer/node_modules/
             st0rmMusicPlayer/public/
-            st0rmMusicPlayer/package.json
-            st0rmMusicPlayer/package-lock.json
-          retention-days: 14 # 产物保留14天，可按需调整
+          retention-days: 14
